@@ -12,11 +12,7 @@ use ark_std::{
     string::String,
     vec,
     vec::Vec,
-    cfg_iter,
 };
-
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 /// Computations are expressed in terms of rank-1 constraint systems (R1CS).
 /// The `generate_constraints` method is called to generate constraints for
@@ -65,14 +61,14 @@ pub struct ConstraintSystem<F: Field> {
     /// Map for gadgets to cache computation results.
     pub cache_map: Rc<RefCell<BTreeMap<TypeId, Box<dyn Any>>>>,
 
-    lc_map: BTreeMap<LcIndex, LinearCombination<F>>,
+    pub lc_map: BTreeMap<LcIndex, LinearCombination<F>>,
 
     #[cfg(feature = "std")]
     constraint_traces: Vec<Option<ConstraintTrace>>,
 
-    a_constraints: Vec<LcIndex>,
-    b_constraints: Vec<LcIndex>,
-    c_constraints: Vec<LcIndex>,
+    pub a_constraints: Vec<LcIndex>,
+    pub b_constraints: Vec<LcIndex>,
+    pub c_constraints: Vec<LcIndex>,
 
     lc_assignment_cache: Rc<RefCell<BTreeMap<LcIndex, F>>>,
 }
@@ -534,13 +530,16 @@ impl<F: Field> ConstraintSystem<F> {
         {
             None
         } else {
-            let a: Vec<_> = cfg_iter!(self.a_constraints)
+            let a: Vec<_> = self.a_constraints
+                .iter()
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
-            let b: Vec<_> = cfg_iter!(self.b_constraints)
+            let b: Vec<_> = self.b_constraints
+                .iter()
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
-            let c: Vec<_> = cfg_iter!(self.c_constraints)
+            let c: Vec<_> = self.c_constraints
+                .iter()
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
 
