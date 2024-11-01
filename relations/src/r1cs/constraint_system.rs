@@ -12,7 +12,11 @@ use ark_std::{
     string::String,
     vec,
     vec::Vec,
+    cfg_iter,
 };
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Computations are expressed in terms of rank-1 constraint systems (R1CS).
 /// The `generate_constraints` method is called to generate constraints for
@@ -530,19 +534,13 @@ impl<F: Field> ConstraintSystem<F> {
         {
             None
         } else {
-            let a: Vec<_> = self
-                .a_constraints
-                .iter()
+            let a: Vec<_> = cfg_iter!(self.a_constraints)
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
-            let b: Vec<_> = self
-                .b_constraints
-                .iter()
+            let b: Vec<_> = cfg_iter!(self.b_constraints)
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
-            let c: Vec<_> = self
-                .c_constraints
-                .iter()
+            let c: Vec<_> = cfg_iter!(self.c_constraints)
                 .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
                 .collect();
 
