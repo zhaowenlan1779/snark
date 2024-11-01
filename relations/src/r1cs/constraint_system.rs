@@ -14,6 +14,9 @@ use ark_std::{
     vec::Vec,
 };
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 /// Computations are expressed in terms of rank-1 constraint systems (R1CS).
 /// The `generate_constraints` method is called to generate constraints for
 /// both CRS generation and for proving.
@@ -109,8 +112,7 @@ pub enum OptimizationGoal {
 
 impl<F: Field> ConstraintSystem<F> {
     #[inline]
-    fn make_row(&self, l: &LinearCombination<F>) -> Vec<(F, usize)> {
-        let num_input = self.num_instance_variables;
+    fn make_row(num_instance_variables: usize, l: &LinearCombination<F>) -> Vec<(F, usize)> {
         l.0.iter()
             .filter_map(|(coeff, var)| {
                 if coeff.is_zero() {
@@ -118,7 +120,7 @@ impl<F: Field> ConstraintSystem<F> {
                 } else {
                     Some((
                         *coeff,
-                        var.get_index_unchecked(num_input).expect("no symbolic LCs"),
+                        var.get_index_unchecked(num_instance_variables).expect("no symbolic LCs"),
                     ))
                 }
             })
@@ -530,17 +532,16 @@ impl<F: Field> ConstraintSystem<F> {
         {
             None
         } else {
-            let a: Vec<_> = self.a_constraints
-                .iter()
-                .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
+            let lc_map = &self.lc_map;
+            let num_instance_variables = self.num_instance_variables;
+            let a: Vec<_> = cfg_iter!(self.a_constraints)
+                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
                 .collect();
-            let b: Vec<_> = self.b_constraints
-                .iter()
-                .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
+            let b: Vec<_> = cfg_iter!(self.b_constraints)
+                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
                 .collect();
-            let c: Vec<_> = self.c_constraints
-                .iter()
-                .map(|index| self.make_row(self.lc_map.get(index).unwrap()))
+            let c: Vec<_> = cfg_iter!(self.c_constraints)
+                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
                 .collect();
 
             let a_num_non_zero: usize = a.iter().map(|lc| lc.len()).sum();
