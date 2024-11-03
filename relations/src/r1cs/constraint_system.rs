@@ -542,7 +542,7 @@ impl<F: Field> ConstraintSystem<F> {
             let make_matrix = |constraints: &Vec<LcIndex>| {
                 #[cfg(feature = "parallel")]
                 let (vals, mut lens) =
-                    constraints.par_chunks(constraints.len() / (rayon::current_num_threads() / 2))
+                    constraints.par_chunks(constraints.len() / rayon::current_num_threads())
                         .map(|chunk| {
                             let mut vals = vec![];
                             let mut lens = vec![];
