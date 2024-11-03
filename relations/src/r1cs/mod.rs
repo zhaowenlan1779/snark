@@ -27,7 +27,8 @@ pub use error::SynthesisError;
 use core::cmp::Ordering;
 
 /// A sparse representation of constraint matrices.
-pub type Matrix<F> = Vec<Vec<(F, usize)>>;
+/// The first vector contains (value, col). The second vector contains the end points of each row.
+pub type Matrix<F> = (Vec<(F, usize)>, Vec<usize>);
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 /// An opaque counter for symbolic linear combinations.

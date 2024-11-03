@@ -120,7 +120,8 @@ impl<F: Field> ConstraintSystem<F> {
                 } else {
                     Some((
                         *coeff,
-                        var.get_index_unchecked(num_instance_variables).expect("no symbolic LCs"),
+                        var.get_index_unchecked(num_instance_variables)
+                            .expect("no symbolic LCs"),
                     ))
                 }
             })
@@ -178,7 +179,8 @@ impl<F: Field> ConstraintSystem<F> {
     /// Specify whether this constraint system should aim to optimize weight,
     /// number of constraints, or neither.
     pub fn set_optimization_goal(&mut self, goal: OptimizationGoal) {
-        // `set_optimization_goal` should only be executed before any constraint or value is created.
+        // `set_optimization_goal` should only be executed before any constraint or
+        // value is created.
         assert_eq!(self.num_instance_variables, 1);
         assert_eq!(self.num_witness_variables, 0);
         assert_eq!(self.num_constraints, 0);
@@ -299,15 +301,17 @@ impl<F: Field> ConstraintSystem<F> {
     /// Transform the map of linear combinations.
     /// Specifically, allow the creation of additional witness assignments.
     ///
-    /// This method is used as a subroutine of `inline_all_lcs` and `outline_lcs`.
+    /// This method is used as a subroutine of `inline_all_lcs` and
+    /// `outline_lcs`.
     ///
-    /// The transformer function is given a references of this constraint system (&self),
-    /// number of times used, and a mutable reference of the linear combination to be transformed.
-    ///     (&ConstraintSystem<F>, usize, &mut LinearCombination<F>)
+    /// The transformer function is given a references of this constraint system
+    /// (&self), number of times used, and a mutable reference of the linear
+    /// combination to be transformed.     (&ConstraintSystem<F>, usize,
+    /// &mut LinearCombination<F>)
     ///
-    /// The transformer function returns the number of new witness variables needed
-    /// and a vector of new witness assignments (if not in the setup mode).
-    ///     (usize, Option<Vec<F>>)
+    /// The transformer function returns the number of new witness variables
+    /// needed and a vector of new witness assignments (if not in the setup
+    /// mode).     (usize, Option<Vec<F>>)
     pub fn transform_lc_map(
         &mut self,
         transformer: &mut dyn FnMut(
@@ -534,27 +538,65 @@ impl<F: Field> ConstraintSystem<F> {
         } else {
             let lc_map = &self.lc_map;
             let num_instance_variables = self.num_instance_variables;
-            let a: Vec<_> = cfg_iter!(self.a_constraints)
-                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
-                .collect();
-            let b: Vec<_> = cfg_iter!(self.b_constraints)
-                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
-                .collect();
-            let c: Vec<_> = cfg_iter!(self.c_constraints)
-                .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
-                .collect();
 
-            let a_num_non_zero: usize = a.iter().map(|lc| lc.len()).sum();
-            let b_num_non_zero: usize = b.iter().map(|lc| lc.len()).sum();
-            let c_num_non_zero: usize = c.iter().map(|lc| lc.len()).sum();
+            let make_matrix = |constraints: &Vec<LcIndex>| {
+                #[cfg(feature = "parallel")]
+                let (vals, mut lens) = cfg_iter!(constraints)
+                    .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
+                    .fold(
+                        || (vec![], vec![]),
+                        |mut acc, x| {
+                            acc.1.push(x.len());
+                            acc.0.extend(x);
+                            acc
+                        },
+                    )
+                    .reduce(
+                        || (vec![], vec![]),
+                        |mut acc, x| {
+                            acc.0.extend(&x.0);
+                            acc.1.extend(&x.1);
+                            acc
+                        },
+                    );
+
+                #[cfg(not(feature = "parallel"))]
+                let (vals, mut lens) = cfg_iter!(constraints)
+                    .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
+                    .fold((vec![], vec![]), |mut acc, x| {
+                        acc.1.push(x.len());
+                        acc.0.extend(x);
+                        acc
+                    });
+                for i in 1..lens.len() {
+                    lens[i] += lens[i - 1];
+                }
+                (vals, lens)
+            };
+
+            #[cfg(feature = "parallel")]
+            let (a, b, c) = {
+                let a_constraints = &self.a_constraints;
+                let b_constraints = &self.b_constraints;
+                let c_constraints = &self.c_constraints;
+                let (a, (b, c)) = rayon::join(
+                    || make_matrix(a_constraints),
+                    || rayon::join(|| make_matrix(b_constraints), || make_matrix(c_constraints)),
+                );
+                (a, b, c)
+            };
+
+            #[cfg(not(feature = "parallel"))]
+            let (a, b, c) = (
+                make_matrix(&self.a_constraints),
+                make_matrix(&self.b_constraints),
+                make_matrix(&self.c_constraints),
+            );
+
             let matrices = ConstraintMatrices {
                 num_instance_variables: self.num_instance_variables,
                 num_witness_variables: self.num_witness_variables,
                 num_constraints: self.num_constraints,
-
-                a_num_non_zero,
-                b_num_non_zero,
-                c_num_non_zero,
 
                 a,
                 b,
@@ -654,12 +696,6 @@ pub struct ConstraintMatrices<F: Field> {
     pub num_witness_variables: usize,
     /// The number of constraints in the constraint system.
     pub num_constraints: usize,
-    /// The number of non_zero entries in the A matrix.
-    pub a_num_non_zero: usize,
-    /// The number of non_zero entries in the B matrix.
-    pub b_num_non_zero: usize,
-    /// The number of non_zero entries in the C matrix.
-    pub c_num_non_zero: usize,
 
     /// The A constraint matrix. This is empty when
     /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
@@ -1038,17 +1074,34 @@ mod tests {
         cs.enforce_constraint(lc!() + Variable::One, lc!() + e, lc!() + e)?;
         cs.inline_all_lcs();
         let matrices = cs.to_matrices().unwrap();
-        assert_eq!(matrices.a[0], vec![(Fr::one(), 1)]);
-        assert_eq!(matrices.b[0], vec![(two, 2)]);
-        assert_eq!(matrices.c[0], vec![(Fr::one(), 3)]);
+        assert_eq!(matrices.a.0[0], (Fr::one(), 1));
+        assert_eq!(matrices.b.0[0], (two, 2));
+        assert_eq!(matrices.c.0[0], (Fr::one(), 3));
 
-        assert_eq!(matrices.a[1], vec![(Fr::one(), 1)]);
-        assert_eq!(matrices.b[1], vec![(Fr::one(), 1), (Fr::one(), 2)]);
-        assert_eq!(matrices.c[1], vec![(Fr::one(), 1), (Fr::one(), 2)]);
+        assert_eq!(matrices.a.1[0], 1);
+        assert_eq!(matrices.b.1[0], 1);
+        assert_eq!(matrices.c.1[0], 1);
 
-        assert_eq!(matrices.a[2], vec![(Fr::one(), 0)]);
-        assert_eq!(matrices.b[2], vec![(two, 1), (two, 2)]);
-        assert_eq!(matrices.c[2], vec![(two, 1), (two, 2)]);
+        assert_eq!(matrices.a.0[1], (Fr::one(), 1));
+        assert_eq!(matrices.b.0[1], (Fr::one(), 1));
+        assert_eq!(matrices.b.0[2], (Fr::one(), 2));
+        assert_eq!(matrices.c.0[1], (Fr::one(), 1));
+        assert_eq!(matrices.c.0[2], (Fr::one(), 2));
+
+        assert_eq!(matrices.a.1[1], 2);
+        assert_eq!(matrices.b.1[1], 3);
+        assert_eq!(matrices.c.1[1], 3);
+
+        assert_eq!(matrices.a.0[2], (Fr::one(), 0));
+        assert_eq!(matrices.b.0[3], (two, 1));
+        assert_eq!(matrices.b.0[4], (two, 2));
+        assert_eq!(matrices.c.0[3], (two, 1));
+        assert_eq!(matrices.c.0[4], (two, 2));
+
+        assert_eq!(matrices.a.1[2], 3);
+        assert_eq!(matrices.b.1[2], 5);
+        assert_eq!(matrices.c.1[2], 5);
+
         Ok(())
     }
 
@@ -1071,20 +1124,32 @@ mod tests {
         cs.finalize();
         assert!(cs.is_satisfied().unwrap());
         let matrices = cs.to_matrices().unwrap();
-        assert_eq!(matrices.a[0], vec![(Fr::one(), 1)]);
-        assert_eq!(matrices.b[0], vec![(two, 2)]);
-        assert_eq!(matrices.c[0], vec![(Fr::one(), 3)]);
+        assert_eq!(matrices.a.0[0], (Fr::one(), 1));
+        assert_eq!(matrices.b.0[0], (two, 2));
+        assert_eq!(matrices.c.0[0], (Fr::one(), 3));
 
-        assert_eq!(matrices.a[1], vec![(Fr::one(), 1)]);
+        assert_eq!(matrices.a.1[0], 1);
+        assert_eq!(matrices.b.1[0], 1);
+        assert_eq!(matrices.c.1[0], 1);
+
+        assert_eq!(matrices.a.0[1], (Fr::one(), 1));
         // Notice here how the variable allocated for d is outlined
         // compared to the example in previous test case.
         // We are optimising for weight: there are less non-zero elements.
-        assert_eq!(matrices.b[1], vec![(Fr::one(), 4)]);
-        assert_eq!(matrices.c[1], vec![(Fr::one(), 4)]);
+        assert_eq!(matrices.b.0[1], (Fr::one(), 4));
+        assert_eq!(matrices.c.0[1], (Fr::one(), 4));
 
-        assert_eq!(matrices.a[2], vec![(Fr::one(), 0)]);
-        assert_eq!(matrices.b[2], vec![(two, 4)]);
-        assert_eq!(matrices.c[2], vec![(two, 4)]);
+        assert_eq!(matrices.a.1[1], 2);
+        assert_eq!(matrices.b.1[1], 2);
+        assert_eq!(matrices.c.1[1], 2);
+
+        assert_eq!(matrices.a.0[2], (Fr::one(), 0));
+        assert_eq!(matrices.b.0[2], (two, 4));
+        assert_eq!(matrices.c.0[2], (two, 4));
+
+        assert_eq!(matrices.a.1[2], 3);
+        assert_eq!(matrices.b.1[2], 3);
+        assert_eq!(matrices.c.1[2], 3);
         Ok(())
     }
 
@@ -1101,7 +1166,8 @@ mod tests {
         // There will be six variables in the system, in the order governed by adding
         // them to the constraint system (Note that the CS is initialised with
         // `Variable::One` in the first position implicitly).
-        // Note also that the all public variables will always be placed before all witnesses
+        // Note also that the all public variables will always be placed before all
+        // witnesses
         //
         // Variable::One
         // Variable::Instance(35)
@@ -1132,7 +1198,8 @@ mod tests {
         // There are four gates(constraints), each generating a row.
         // Resulting matrices:
         // (Note how 2nd & 3rd columns are swapped compared to the online example.
-        // This results from an implementation detail of placing all Variable::Instances(_) first.
+        // This results from an implementation detail of placing all
+        // Variable::Instances(_) first.
         //
         // A
         // [0, 0, 1, 0, 0, 0]
@@ -1149,21 +1216,37 @@ mod tests {
         // [0, 0, 0, 0, 1, 0]
         // [0, 0, 0, 0, 0, 1]
         // [0, 1, 0, 0, 0, 0]
-        assert_eq!(matrices.a[0], vec![(Fr::one(), 2)]);
-        assert_eq!(matrices.b[0], vec![(Fr::one(), 2)]);
-        assert_eq!(matrices.c[0], vec![(Fr::one(), 3)]);
+        assert_eq!(matrices.a.0[0], (Fr::one(), 2));
+        assert_eq!(matrices.b.0[0], (Fr::one(), 2));
+        assert_eq!(matrices.c.0[0], (Fr::one(), 3));
+        assert_eq!(matrices.a.1[0], 1);
+        assert_eq!(matrices.b.1[0], 1);
+        assert_eq!(matrices.c.1[0], 1);
 
-        assert_eq!(matrices.a[1], vec![(Fr::one(), 3)]);
-        assert_eq!(matrices.b[1], vec![(Fr::one(), 2)]);
-        assert_eq!(matrices.c[1], vec![(Fr::one(), 4)]);
+        assert_eq!(matrices.a.0[1], (Fr::one(), 3));
+        assert_eq!(matrices.b.0[1], (Fr::one(), 2));
+        assert_eq!(matrices.c.0[1], (Fr::one(), 4));
+        assert_eq!(matrices.a.1[1], 2);
+        assert_eq!(matrices.b.1[1], 2);
+        assert_eq!(matrices.c.1[1], 2);
 
-        assert_eq!(matrices.a[2], vec![(Fr::one(), 2), (Fr::one(), 4)]);
-        assert_eq!(matrices.b[2], vec![(Fr::one(), 0)]);
-        assert_eq!(matrices.c[2], vec![(Fr::one(), 5)]);
+        assert_eq!(matrices.a.0[2], (Fr::one(), 2));
+        assert_eq!(matrices.a.0[3], (Fr::one(), 4));
 
-        assert_eq!(matrices.a[3], vec![(five, 0), (Fr::one(), 5)]);
-        assert_eq!(matrices.b[3], vec![(Fr::one(), 0)]);
-        assert_eq!(matrices.c[3], vec![(Fr::one(), 1)]);
+        assert_eq!(matrices.b.0[2], (Fr::one(), 0));
+        assert_eq!(matrices.c.0[2], (Fr::one(), 5));
+
+        assert_eq!(matrices.a.1[2], 4);
+        assert_eq!(matrices.b.1[2], 3);
+        assert_eq!(matrices.c.1[2], 3);
+
+        assert_eq!(matrices.a.0[4], (five, 0));
+        assert_eq!(matrices.a.0[5], (Fr::one(), 5));
+        assert_eq!(matrices.b.0[3], (Fr::one(), 0));
+        assert_eq!(matrices.c.0[3], (Fr::one(), 1));
+        assert_eq!(matrices.a.1[3], 6);
+        assert_eq!(matrices.b.1[3], 4);
+        assert_eq!(matrices.c.1[3], 4);
         Ok(())
     }
 }
