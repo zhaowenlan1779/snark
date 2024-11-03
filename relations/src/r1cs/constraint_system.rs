@@ -541,24 +541,37 @@ impl<F: Field> ConstraintSystem<F> {
 
             let make_matrix = |constraints: &Vec<LcIndex>| {
                 #[cfg(feature = "parallel")]
-                let (vals, mut lens) = cfg_iter!(constraints)
-                    .map(|index| Self::make_row(num_instance_variables, lc_map.get(index).unwrap()))
-                    .fold(
-                        || (vec![], vec![]),
-                        |mut acc, x| {
-                            acc.1.push(x.len());
-                            acc.0.extend(x);
-                            acc
-                        },
-                    )
-                    .reduce(
-                        || (vec![], vec![]),
-                        |mut acc, x| {
-                            acc.0.extend(&x.0);
-                            acc.1.extend(&x.1);
-                            acc
-                        },
-                    );
+                let (vals, mut lens) =
+                    constraints.par_chunks(constraints.len() / rayon::current_num_threads())
+                        .map(|chunk| {
+                            let mut vals = vec![];
+                            let mut lens = vec![];
+                            for index in chunk {
+                                let mut len = 0usize;
+                                let row = lc_map.get(index).unwrap();
+                                row.0.iter()
+                                    .for_each(|(coeff, var)| {
+                                        if !coeff.is_zero() {
+                                            vals.push((
+                                                *coeff,
+                                                var.get_index_unchecked(num_instance_variables)
+                                                    .expect("no symbolic LCs"),
+                                            ));
+                                            len += 1;
+                                        }
+                                    });
+                                lens.push(len);
+                            }
+                            (vals, lens)
+                        })
+                        .reduce(
+                            || (vec![], vec![]),
+                            |mut acc, x| {
+                                acc.0.extend(&x.0);
+                                acc.1.extend(&x.1);
+                                acc
+                            },
+                        );
 
                 #[cfg(not(feature = "parallel"))]
                 let (vals, mut lens) = cfg_iter!(constraints)
