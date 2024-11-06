@@ -28,18 +28,6 @@ impl<F: Field> LinearCombination<F> {
         Self::new()
     }
 
-    pub fn check_empty(&self, num_instance_variables: usize) -> bool {
-        let mut b = false;
-        self.0.iter()
-            .for_each(|(coeff, var)| {
-                match var.get_index_unchecked(num_instance_variables) {
-                    Some(index) => (),
-                    _ => b = true,
-                };
-            });
-        b
-    }
-
     /// Deduplicate entries in `self`.
     pub fn compactify(&mut self) {
         self.0.sort_by_key(|e| e.1);

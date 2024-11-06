@@ -113,10 +113,6 @@ pub enum OptimizationGoal {
 impl<F: Field> ConstraintSystem<F> {
     #[inline]
     fn make_row(num_instance_variables: usize, l: &LinearCombination<F>) -> Vec<(F, usize)> {
-        if l.check_empty(num_instance_variables) {
-            return vec![];
-        }
-        
         l.0.iter()
             .filter_map(|(coeff, var)| {
                 if coeff.is_zero() {
@@ -285,7 +281,7 @@ impl<F: Field> ConstraintSystem<F> {
     /// Count the number of times each LC is used within other LCs in the
     /// constraint system
     fn lc_num_times_used(&self, count_sinks: bool) -> Vec<usize> {
-        let mut num_times_used = vec![0; self.lc_map.len()];
+        let mut num_times_used = vec![0; self.num_linear_combinations];
 
         // Iterate over every lc in constraint system
         for (index, lc) in self.lc_map.iter() {
@@ -556,13 +552,12 @@ impl<F: Field> ConstraintSystem<F> {
                                 row.0.iter()
                                     .for_each(|(coeff, var)| {
                                         if !coeff.is_zero() {
-                                            match var.get_index_unchecked(num_instance_variables) {
-                                                Some(index) => {
-                                                    vals.push((*coeff, index));
-                                                },
-                                                _ => (),
-                                            }
-                                        len += 1;
+                                            vals.push((
+                                                *coeff,
+                                                var.get_index_unchecked(num_instance_variables)
+                                                    .expect("no symbolic LCs"),
+                                            ));
+                                            len += 1;
                                         }
                                     });
                                 lens.push(len);
