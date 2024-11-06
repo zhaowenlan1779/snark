@@ -556,12 +556,14 @@ impl<F: Field> ConstraintSystem<F> {
                                 row.0.iter()
                                     .for_each(|(coeff, var)| {
                                         if !coeff.is_zero() {
-                                            vals.push((
-                                                *coeff,
-                                                var.get_index_unchecked(num_instance_variables)
-                                                    .expect("no symbolic LCs"),
-                                            ));
-                                            len += 1;
+                                            match var.get_index_unchecked(num_instance_variables) {
+                                                Some(index) => {
+                                                    vals.push((*coeff, index));
+                                                    len += 1;
+                                                },
+                                                _ => (),
+                                            }
+                                            
                                         }
                                     });
                                 lens.push(len);
