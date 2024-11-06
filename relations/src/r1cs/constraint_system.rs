@@ -113,6 +113,10 @@ pub enum OptimizationGoal {
 impl<F: Field> ConstraintSystem<F> {
     #[inline]
     fn make_row(num_instance_variables: usize, l: &LinearCombination<F>) -> Vec<(F, usize)> {
+        if l.check_empty(num_instance_variables) {
+            return vec![];
+        }
+        
         l.0.iter()
             .filter_map(|(coeff, var)| {
                 if coeff.is_zero() {
