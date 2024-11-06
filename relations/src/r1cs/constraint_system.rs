@@ -559,11 +559,10 @@ impl<F: Field> ConstraintSystem<F> {
                                             match var.get_index_unchecked(num_instance_variables) {
                                                 Some(index) => {
                                                     vals.push((*coeff, index));
-                                                    len += 1;
                                                 },
                                                 _ => (),
                                             }
-                                            
+                                        len += 1;
                                         }
                                     });
                                 lens.push(len);
